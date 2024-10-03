@@ -38,9 +38,9 @@ def load_ref(ref, ext='fasta'):
     
     for fasta in reference:
         name, sequence = fasta.id, str(fasta.seq)
-        ref[name] = sequence
         genome_len += len(sequence)
-    
+        ref[name] = list(sequence)
+        
     logging.info('Reference loaded successfully')
     return ref, genome_len
 
@@ -141,7 +141,7 @@ def score_pair(pair,read_mers):
     return(errors, [(start_hap_pos, end_hap_pos, haplotype1, errors1, comb1),(start_hap_pos, end_hap_pos, haplotype2, errors2, comb2)])
  
     
-def get_phased_variants(ref, alleles, read_mers, alleles_genotype, aplotypes_combinations_generator=aplotypes_combinations_generator, k=21):
+def get_phased_variants(ref, alleles, read_mers, aplotypes_combinations_generator=aplotypes_combinations_generator, k=21):
     #logging.info('Phasing variants')
     best_haps = []
     best_score = float('inf')
@@ -207,7 +207,7 @@ def score_chunk_pair(pair, read_mers, is_first_chunk=None, is_last_chunk=None):
     return(errors, [(start_hap_pos, end_hap_pos, haplotype1, errors1, comb1),(start_hap_pos, end_hap_pos, haplotype2, errors2, comb2)])
     
 
-def phase_chunks(ref, alleles, read_mers, cartesian_product_generator=aplotypes_combinations_generator, k=21, is_first_chunk=None, is_last_chunk=None):    
+def phase_chunks(ref, alleles, read_mers, aplotypes_combinations_generator=aplotypes_combinations_generator, k=21, is_first_chunk=None, is_last_chunk=None):    
     best_haps = []
     best_score = float('inf')
     
@@ -251,7 +251,7 @@ def phase_chunks(ref, alleles, read_mers, cartesian_product_generator=aplotypes_
 
     return best_haps
 
-def get_phased_haplotypes(ref, alleles, read_mers, alleles_genotype, get_phased_variants=get_phased_variants, cartesian_product_generator=cartesian_product_generator, k=21, max_vars=15):
+def get_phased_haplotypes(ref, alleles, read_mers, get_phased_variants=get_phased_variants, cartesian_product_generator=aplotypes_combinations_generator, k=21, max_vars=15):
     #logging.info('Getting phased haplotypes')
     if len(alleles) <= max_vars:
         best_haps = get_phased_variants(ref, alleles, read_mers, alleles_genotype, aplotypes_combinations_generator=aplotypes_combinations_generator)
@@ -284,17 +284,11 @@ def cluster_variants(ref, vcf_file, sample='Sample', k=21, output_path=''):
 
     logging.info(f'Clustering variants from VCF file {vcf_file}')
     
-    ref_list = list(ref)
     managed_homozygous = []
     
     with open(output_path + 'skipped-vcf-record.txt','w') as skipped:
         ill_vcf_reader_iterator = vcf.Reader(open(vcf_file, 'r'))
         ill_vcf_reader = []
-        
-            
-        clusters = {}
-        c = 0
-        p = 0
         
         for record in ill_vcf_reader_iterator:
             alleles = []
@@ -302,18 +296,19 @@ def cluster_variants(ref, vcf_file, sample='Sample', k=21, output_path=''):
             '''
             
             If a variant is homozygous, we substitute it directly in the reference, 
-            without adding it to the clusters
+            without adding it to the variants' clusters
  
             '''
             
             if str(record.genotype(sample)['GT']) == '1/1':
-                check_alt = special_match(str(alt))
+                check_alt = special_match(str(record.ALT[0]))
                 if not check_alt:
                     alleles = []
                     skipped.write(str(record) + '\n')
                     continue
-                ref_list[record.POS-1,:int(record.POS-1 + len(record.REF))] = ['']*len_ref_allele
-                ref_list[record.POS-1] = record.ALT[0] # we use [] because ref.ALT it's a list by default
+                curr_chromosome =  str(record.CHROM)
+                ref[curr_chromosome][record.POS-1,:int(record.POS-1 + len(record.REF))] = ['']*len(record.REF)
+                ref[curr_chromosome][record.POS-1] = record.ALT[0] # we use [] because ref.ALT it's a list by default
                 managed_homozygous.append(record) # just tmp for checking
                 continue
 
@@ -338,24 +333,23 @@ def cluster_variants(ref, vcf_file, sample='Sample', k=21, output_path=''):
                     'GT': record.genotype(sample)['GT'],
                     'ALLELES': alleles
                 })
-                p+=1 # this is our current position of our current variant
-            
-            if ill_vcf_reader[p]['CHROM'] not in clusters.keys():
-                c = 0
-                clusters[ill_vcf_reader[p]['CHROM']] = {}
-                clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]] 
-                continue
-            
-            # if a variant is 1/1, we just do not arrive here
-            if ill_vcf_reader[p]['AFF_START'] - ill_vcf_reader[p-1]['AFF_START'] <= k:
-                clusters[ill_vcf_reader[p]['CHROM']][c].append(ill_vcf_reader[p])
-                continue
-            c += 1
-            clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]]
-
+    
+    clusters = {}
+    c = 0
+    for p in range(0, len(ill_vcf_reader)):
+        if ill_vcf_reader[p]['CHROM'] not in clusters.keys():
+            c = 0
+            clusters[ill_vcf_reader[p]['CHROM']] = {}
+            clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]]    
+            continue
+        if ill_vcf_reader[p]['AFF_START'] - ill_vcf_reader[p-1]['AFF_START'] <= k:
+            clusters[ill_vcf_reader[p]['CHROM']][c].append(ill_vcf_reader[p])
+            continue
+        c += 1
+        clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]]
 
     logging.info('Variants clustered successfully')
-    return (ref_list, clusters) 
+    return clusters 
 
 def create_pseudo_haplotypes(ref, clusters, read_mers, output_haps='pseudo_haps.fasta'):
     logging.info('Creating pseudo-haplotypes')
