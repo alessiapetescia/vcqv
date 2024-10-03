@@ -76,23 +76,36 @@ def query_hash_table(h, kmer):
     mer.canonicalize()
     return h[mer]
 
-def cartesian_product_generator(iterables):
-    #logging.info('Generating Cartesian product of iterables')
-    if len(iterables) == 0:
-        yield ()
-        return
+def aplotypes_combinations_generator(variants):
+    """
+    Genera tutte le possibili coppie di aplotipi dato un insieme di varianti eterozigoti.
+    Per ogni variante (allele1, allele2), una combinazione prende allele1 mentre l'altra prende allele2 e viceversa.
     
-    stack = [(0, ())]
+    :param variants: Una lista di tuple, dove ogni tupla rappresenta una variante con due alleli (allele1, allele2).
+    :return: Genera tutte le coppie di aplotipi.
+    """
+    
+    if len(variants) == 0:
+        yield ([], [])
+        return
+
+    # Stack per l'iterazione
+    stack = [(0, ([], []))]
+    
     while stack:
-        idx, current_combination = stack.pop()
-        if idx == len(iterables):
-            yield current_combination
+        idx, (aplotipo1, aplotipo2) = stack.pop()
+        
+        if idx == len(variants):
+            yield (aplotipo1, aplotipo2)
             continue
         
-        for item in iterables[idx]:
-            new_combination = current_combination + (item,)
-            stack.append((idx + 1, new_combination))
-
+        # Prendi i due alleli per la variante corrente
+        allele1, allele2 = variants[idx]
+        
+        # Genera nuove coppie di aplotipi con le varianti assegnate in modo alternato
+        stack.append((idx + 1, (aplotipo1 + [allele1], aplotipo2 + [allele2])))
+        stack.append((idx + 1, (aplotipo1 + [allele2], aplotipo2 + [allele1])))
+        
 def get_phased_variants(ref, alleles, read_mers, alleles_genotype, cartesian_product_generator=cartesian_product_generator, k=21):
     #logging.info('Phasing variants')
     best_haps = []
@@ -253,11 +266,19 @@ def get_phased_haplotypes(ref, alleles, read_mers, alleles_genotype, get_phased_
 def special_match(strg, search=re.compile(r'[a-zA-Z]').search):
     return bool(search(strg))
 
+
 def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
+
     logging.info(f'Clustering variants from VCF file {vcf_file}')
+    
     with open(output_path + 'skipped-vcf-record.txt','w') as skipped:
         ill_vcf_reader_iterator = vcf.Reader(open(vcf_file, 'r'))
         ill_vcf_reader = []
+        
+            
+        clusters = {}
+        c = 0
+        p = 0
 
         for record in ill_vcf_reader_iterator:
             alleles = []
@@ -281,20 +302,21 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
                     'GT': record.genotype(sample)['GT'],
                     'ALLELES': alleles
                 })
+                p += 1
+            
+            if ill_vcf_reader[p]['CHROM'] not in clusters.keys():
+                c = 0
+                clusters[ill_vcf_reader[p]['CHROM']] = {}
+                clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]] 
+                continue
+            
+            # if a variant has a 1/1 genotype, split the chain
+            if ill_vcf_reader[p]['AFF_START'] - ill_vcf_reader[p-1]['AFF_START'] <= k and ill_vcf_reader[p]['GT'] != '1/1':
+                clusters[ill_vcf_reader[p]['CHROM']][c].append(ill_vcf_reader[p])
+                continue
+            c += 1
+            clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]]
 
-    clusters = {}
-    c = 0
-    for p in range(0, len(ill_vcf_reader)):
-        if ill_vcf_reader[p]['CHROM'] not in clusters.keys():
-            c = 0
-            clusters[ill_vcf_reader[p]['CHROM']] = {}
-            clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]]    
-            continue
-        if ill_vcf_reader[p]['AFF_START'] - ill_vcf_reader[p-1]['AFF_START'] <= k:
-            clusters[ill_vcf_reader[p]['CHROM']][c].append(ill_vcf_reader[p])
-            continue
-        c += 1
-        clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]]
 
     logging.info('Variants clustered successfully')
     return clusters
@@ -369,7 +391,7 @@ def calculate_coverage(k, genome_len, read_mers_file):
     with open('stats.txt', 'r') as file:
         f = file.readlines()
         tot_k = int(f[2].split()[-1].strip())
-    coverage = tot_k / genome_len
+    coverage = tot_k / (genome_len - k + 1)
     logging.info(f'Coverage calculated: {coverage}')
     return coverage
 
@@ -416,7 +438,6 @@ def main(args):
     run_jf_count(args.reads, k, args.output + 'reads_mer_counts.jf', args.threads, args.min_count)
     read_mers = load_query_table(args.output + 'reads_mer_counts.jf')
     read_mers_coverage = calculate_coverage(k, genome_len, args.output + 'reads_mer_counts.jf')
-    read_mers_coverage = 3.92
     clusters = cluster_variants(args.vcf, args.sample, k, args.output)
     
     best_haps = create_pseudo_haplotypes(ref, clusters, read_mers, args.output + 'pseudo_haps.fasta')
@@ -441,4 +462,3 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
-
