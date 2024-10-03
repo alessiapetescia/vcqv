@@ -267,9 +267,12 @@ def special_match(strg, search=re.compile(r'[a-zA-Z]').search):
     return bool(search(strg))
 
 
-def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
+def cluster_variants(ref, vcf_file, sample='Sample', k=21, output_path=''):
 
     logging.info(f'Clustering variants from VCF file {vcf_file}')
+    
+    ref_list = list(ref)
+    managed_homozygous = []
     
     with open(output_path + 'skipped-vcf-record.txt','w') as skipped:
         ill_vcf_reader_iterator = vcf.Reader(open(vcf_file, 'r'))
@@ -279,9 +282,27 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
         clusters = {}
         c = 0
         p = 0
-
+        
         for record in ill_vcf_reader_iterator:
             alleles = []
+            
+            '''   
+            If a variant is homozygous, we substitute it directly in the reference, 
+            without adding it to the clusters
+            '''
+            
+            if str(record.genotype(sample)['GT']) == '1/1':
+                check_alt = special_match(str(alt))
+                if not check_alt:
+                    alleles = []
+                    skipped.write(str(record) + '\n')
+                    continue
+                ref_list[record.POS-1,:int(record.POS-1 + len(record.REF))] = ['']*len_ref_allele
+                ref_list[record.POS-1] = record.ALT[0] # we use [] because ref.ALT it's a list by default
+                managed_homozygous.append(record) # just tmp for checking
+                continue
+
+                
             if str(record.genotype(sample)['GT']) in ['1/0', '0/1']:
                 alleles.append((record.POS-1, int(record.POS-1 + len(record.REF)), record.REF))
                 
@@ -302,7 +323,7 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
                     'GT': record.genotype(sample)['GT'],
                     'ALLELES': alleles
                 })
-                p += 1
+                p+=1 # this is our current position of our current variant
             
             if ill_vcf_reader[p]['CHROM'] not in clusters.keys():
                 c = 0
@@ -310,8 +331,8 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
                 clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]] 
                 continue
             
-            # if a variant has a 1/1 genotype, split the chain
-            if ill_vcf_reader[p]['AFF_START'] - ill_vcf_reader[p-1]['AFF_START'] <= k and ill_vcf_reader[p]['GT'] != '1/1':
+            # if a variant is 1/1, we just do not arrive here
+            if ill_vcf_reader[p]['AFF_START'] - ill_vcf_reader[p-1]['AFF_START'] <= k:
                 clusters[ill_vcf_reader[p]['CHROM']][c].append(ill_vcf_reader[p])
                 continue
             c += 1
@@ -319,7 +340,7 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
 
 
     logging.info('Variants clustered successfully')
-    return clusters
+    return (ref_list, clusters)
 
 def create_pseudo_haplotypes(ref, clusters, read_mers, output_haps='pseudo_haps.fasta'):
     logging.info('Creating pseudo-haplotypes')
