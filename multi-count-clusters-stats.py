@@ -54,12 +54,10 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
     with open(skipped_file, 'w') as skipped:
         ill_vcf_reader_iterator = vcf.Reader(open(vcf_file, 'r'))
         ill_vcf_reader = []
-:
-
         for record in ill_vcf_reader_iterator:
             alleles = []
 
-            if str(record.genotype(sample)['GT']) == '1/1:
+            if str(record.genotype(sample)['GT']) == '1/1':
                 continue
             
             if str(record.genotype(sample)['GT']) in ['1/0', '0/1']:
