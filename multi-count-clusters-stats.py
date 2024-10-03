@@ -58,6 +58,10 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
 
         for record in ill_vcf_reader_iterator:
             alleles = []
+
+            if str(record.genotype(sample)['GT']) == '1/1:
+                continue
+            
             if str(record.genotype(sample)['GT']) in ['1/0', '0/1']:
                 alleles.append((record.POS-1, int(record.POS-1 + len(record.REF)), record.REF))
                 
@@ -90,7 +94,7 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
             clusters[ill_vcf_reader[p]['CHROM']] = {}
             clusters[ill_vcf_reader[p]['CHROM']][c] = [ill_vcf_reader[p]]    
             continue
-        if ill_vcf_reader[p]['AFF_START'] - ill_vcf_reader[p-1]['AFF_START'] <= k and ill_vcf_reader[p]['GT'] != '1/1':
+        if ill_vcf_reader[p]['AFF_START'] - ill_vcf_reader[p-1]['AFF_START'] <= k:
             clusters[ill_vcf_reader[p]['CHROM']][c].append(ill_vcf_reader[p])
             continue
         c += 1
