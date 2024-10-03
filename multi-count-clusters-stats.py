@@ -104,7 +104,7 @@ def cluster_variants(vcf_file, sample='Sample', k=21, output_path=''):
     stats_file = f"{output_path}{sample}_k{k}_clusters_stats.txt"
     k_clusters_freq = defaultdict(int)
     tot_clusters = 0
-        num_clusters_gt_1 = 0
+    num_clusters_gt_1 = 0
     total_len_gt_1 = 0
 
     with open(stats_file, 'w') as stats:
