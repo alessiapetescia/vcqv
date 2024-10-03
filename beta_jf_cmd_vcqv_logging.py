@@ -106,159 +106,172 @@ def aplotypes_combinations_generator(variants):
         stack.append((idx + 1, (aplotipo1 + [allele1], aplotipo2 + [allele2])))
         stack.append((idx + 1, (aplotipo1 + [allele2], aplotipo2 + [allele1])))
         
-def get_phased_variants(ref, alleles, read_mers, alleles_genotype, cartesian_product_generator=cartesian_product_generator, k=21):
+def score_single_hap(comb,read_mers):
+
+    start_hap_pos = comb[0][0] - k + 1
+        
+    hap = [] 
+    prev_pos = start_hap_pos  
+    for var in comb:
+        hap.append(ref[prev_pos:var[0]])
+        hap.append(var[2])
+        prev_pos = var[1]
+
+    end_hap_pos = prev_pos + k - 1
+    hap.append(ref[prev_pos:end_hap_pos])
+    haplotype = ''.join(hap)
+    errors = 0
+
+    for p in range(0, len(haplotype) - k + 1):
+        kmer_seq = haplotype[p:p+k]
+        mer_count = query_hash_table(read_mers, kmer_seq)
+        if not mer_count:
+            errors += 1
+        
+    haplotype = haplotype[k-1: len(haplotype)-k+1]
+    
+    return(errors,haplotype,comb[0][0],comb[-1][0],comb)
+
+def score_pair(pair,read_mers): 
+    errors1, haplotype1, start_hap_pos, end_hap_pos, comb1 = score_single_hap(pair[0], read_mers)
+    error2, haplotype2, _ , _, comb2 = score_single_hap(pair[1], read_mers)
+    
+    errors = errors1 + errors2
+    
+    return(errors, [(start_hap_pos, end_hap_pos, haplotype1, errors1, comb1),(start_hap_pos, end_hap_pos, haplotype2, errors2, comb2)])
+ 
+    
+def get_phased_variants(ref, alleles, read_mers, alleles_genotype, aplotypes_combinations_generator=aplotypes_combinations_generator, k=21):
     #logging.info('Phasing variants')
     best_haps = []
-    
-    for i in range(0, len(alleles_genotype)):
-        if alleles_genotype[i] == '1/2' or alleles_genotype[i] == '2/1':
-            alleles_genotype[i] = '0/1'
-        elif alleles_genotype[i] == '1/0':
-            alleles_genotype[i] = '0/1'
-    
     best_score = float('inf')
-    combs = cartesian_product_generator(alleles)
-
-    for comb in combs:
-        start_hap_pos = comb[0][0] - k + 1
-        hap = [] 
-        prev_pos = start_hap_pos  
-        for var in comb:
-            hap.append(ref[prev_pos:var[0]])
-            hap.append(var[2])
-            prev_pos = var[1]
-        
-        end_hap_pos = prev_pos + k - 1
-        hap.append(ref[prev_pos:end_hap_pos])
-        haplotype = ''.join(hap)
-        errors = 0
-        
-        for p in range(0, len(haplotype) - k + 1):
-            kmer_seq = haplotype[p:p+k]
-            mer_count = query_hash_table(read_mers, kmer_seq)
-            if not mer_count:
-                errors += 1
-        
-        haplotype = haplotype[k-1: len(haplotype)-k+1]
-
-        if errors < best_score:
-            best_haps = [(start_hap_pos, end_hap_pos, haplotype, errors, comb)]
-            best_score = errors
-        elif errors == best_score:
-            curr_pair_genotype = []
-            for v1, v2 in zip(best_haps[0][4], comb):
-                var1, var2 = hash(v1), hash(v2)
-                if var1 == var2:
-                    curr_pair_genotype.append('1/1')
-                else:
-                    curr_pair_genotype.append('0/1')
-            if curr_pair_genotype == alleles_genotype:
-                best_haps = [best_haps[0], (start_hap_pos, end_hap_pos, haplotype, errors, comb)]
+    pairs = aplotypes_combinations_generator(alleles)
     
-    if len(best_haps) == 2:
-        best_haps.append('1/2')
-    else:
-        best_haps.append('1/1')
+    for pair in pairs:
+        errors, haps = score_pair(pair)
         
-    #logging.info('Phased variants identified')
-    return best_haps
+        if errors == 0:
+            best_haps = haps
+            break
+            
+        if errors < best_score:
+            best_haps = haps
+            best_score = errors
 
-def phase_chunks(ref, alleles, read_mers, alleles_genotype=None, cartesian_product_generator=cartesian_product_generator, k=21, is_first_chunk=None, is_last_chunk=None, get_genotype=None):
-    #logging.info('Phasing chunks')
+    return best_haps    
+
+
+
+def score_single_hap_chunk(comb,read_mers, is_first_chunk=None, is_last_chunk=None):
+    
+    if is_first_chunk:
+        start_hap_pos = comb[0][0] - k + 1
+    else:
+        start_hap_pos = comb[0][0] 
+        
+    hap = [] 
+    prev_pos = start_hap_pos  
+    for var in comb:
+        hap.append(ref[prev_pos:var[0]])
+        hap.append(var[2])
+        prev_pos = var[1]
+        
+    if is_last_chunk:
+        end_hap_pos = prev_pos + k - 1
+    else:
+        end_hap_pos = prev_pos 
+        
+    hap.append(ref[prev_pos:end_hap_pos])
+    haplotype = ''.join(hap)
+    errors = 0
+
+    for p in range(0, len(haplotype) - k + 1):
+        kmer_seq = haplotype[p:p+k]
+        mer_count = query_hash_table(read_mers, kmer_seq)
+        if not mer_count:
+            errors += 1
+    
+    if is_first_chunk:   
+        haplotype = haplotype[k-1: len(haplotype)]
+    elif is_last_chunk:
+        haplotype = haplotype[: len(haplotype) - k + 1]
+        
+    return(errors,haplotype,comb[0][0],comb[-1][0],comb)
+
+def score_chunk_pair(pair, read_mers, is_first_chunk=None, is_last_chunk=None):
+    errors1, haplotype1, start_hap_pos, end_hap_pos, comb1 = score_single_hap_chunk(pair[0],read_mers, is_first_chunk, is_last_chunk)
+    error2, haplotype2, _ , _, comb2 = score_single_hap_chunk(pair[1],read_mers, is_first_chunk, is_last_chunk)
+    
+    errors = errors1 + errors2
+    
+    return(errors, [(start_hap_pos, end_hap_pos, haplotype1, errors1, comb1),(start_hap_pos, end_hap_pos, haplotype2, errors2, comb2)])
+    
+
+def phase_chunks(ref, alleles, read_mers, cartesian_product_generator=aplotypes_combinations_generator, k=21, is_first_chunk=None, is_last_chunk=None):    
     best_haps = []
     best_score = float('inf')
-    combs = cartesian_product_generator(alleles)
     
-    if not get_genotype:
-        for i in range(0, len(alleles_genotype)):
-            if alleles_genotype[i] == '1/2' or alleles_genotype[i] == '2/1':
-                alleles_genotype[i] = '0/1'
-            elif alleles_genotype[i] == '1/0':
-                alleles_genotype[i] = '0/1'
+    # compute all valid pairs of haps for a chunk
+    pairs = aplotypes_combinations_generator(alleles)
+    
+    if is_first_chunk:
+        for pair in pairs:
+            errors, haps = score_chunk_pair(pair, read_mers, is_first_chunk=True, is_last_chunk=None)
+            
+            if errors == 0:
+                best_haps = haps
+                break
+                    
+            if errors < best_score:
+                best_haps = haps
+                best_score = errors
                 
-    for comb in combs:
-        if is_first_chunk:
-            start_hap_pos = comb[0][0] - k + 1
-        else:
-            start_hap_pos = comb[0][0]
-        
-        hap = [] 
-        prev_pos = start_hap_pos
-        for var in comb:
-            hap.append(ref[prev_pos:var[0]])
-            hap.append(var[2])
-            prev_pos = var[1]
-        
-        if is_last_chunk:
-            end_hap_pos = prev_pos + k - 1
-            hap.append(ref[prev_pos:end_hap_pos])
-        else:
-            end_hap_pos = prev_pos
-        haplotype = ''.join(hap)
-        errors = 0
-        
-        for p in range(0, len(haplotype) - k + 1):
-            kmer_seq = haplotype[p:p+k]
-            mer_count = query_hash_table(read_mers, kmer_seq)
-            if not mer_count:
-                errors += 1
-        
-        if get_genotype:
+    elif is_last_chunk:  
+        for pair in pairs:
+            errors, haps = score_chunk_pair(pair, read_mers, is_first_chunk=None, is_last_chunk=True)
+            
+            if errors == 0:
+                best_haps = haps
+                break
+                    
             if errors < best_score:
-                best_haps = [(start_hap_pos, end_hap_pos, haplotype, errors, comb)]
+                best_haps = haps
                 best_score = errors
-            elif errors == best_score:
-                best_haps = [best_haps[0], (start_hap_pos, end_hap_pos, haplotype, errors, comb)]
-        else:
+    else:      
+        for pair in pairs:
+            errors, haps = score_chunk_pair(pair, read_mers)
+            
+            if errors == 0:
+                best_haps = haps
+                break
+                    
             if errors < best_score:
-                best_haps = [(start_hap_pos, end_hap_pos, haplotype, errors, comb)]
+                best_haps = haps
                 best_score = errors
-            elif errors == best_score:
-                curr_pair_genotype = []
-                for v1, v2 in zip(best_haps[0][4], comb):
-                    var1, var2 = hash(v1), hash(v2)
-                    if var1 == var2:
-                        curr_pair_genotype.append('1/1')
-                    else:
-                        curr_pair_genotype.append('0/1')
-                if curr_pair_genotype == alleles_genotype:
-                    best_haps = [best_haps[0], (start_hap_pos, end_hap_pos, haplotype, errors, comb)]
-    
-    if get_genotype:
-        if len(best_haps) == 2:
-            best_haps = [list(best_haps[0]), list(best_haps[1])]
-            best_haps[0][0], best_haps[0][1], best_haps[0][2] = best_haps[0][0]+k-1, best_haps[0][1]-k+1, best_haps[0][2][k-1:len(best_haps[0][2])-k+1]
-            best_haps[1][0], best_haps[1][1], best_haps[1][2] = best_haps[1][0]+k-1, best_haps[1][1]-k+1, best_haps[1][2][k-1:len(best_haps[1][2])-k+1]
-            best_haps.append('1/2')
-        else:
-            best_haps = [list(best_haps[0])]
-            best_haps[0][0], best_haps[0][1], best_haps[0][2] = best_haps[0][0]+k-1, best_haps[0][1]-k+1, best_haps[0][2][k-1:len(best_haps[0][2])-k+1]
-            best_haps.append('1/1')
 
-    #logging.info('Chunks phased successfully')
     return best_haps
 
 def get_phased_haplotypes(ref, alleles, read_mers, alleles_genotype, get_phased_variants=get_phased_variants, cartesian_product_generator=cartesian_product_generator, k=21, max_vars=15):
     #logging.info('Getting phased haplotypes')
     if len(alleles) <= max_vars:
-        best_haps = get_phased_variants(ref, alleles, read_mers, alleles_genotype, cartesian_product_generator, k)
+        best_haps = get_phased_variants(ref, alleles, read_mers, alleles_genotype, aplotypes_combinations_generator=aplotypes_combinations_generator)
     else:
         chunks = [alleles[x:x+max_vars] for x in range(0, len(alleles), max_vars)]
-        chunks_genotype = [alleles_genotype[x:x+max_vars] for x in range(0, len(alleles), max_vars)]
         best_partial_haps = []
         
-        best_first_chunk = phase_chunks(ref, chunks[0], read_mers, chunks_genotype[0], cartesian_product_generator, k, is_first_chunk='y')
+        best_first_chunk = phase_chunks(ref, chunks[0], read_mers, cartesian_product_generator=aplotypes_combinations_generator, k, is_first_chunk=True, is_last_chunk=None) 
         best_partial_haps.append(best_first_chunk)
         
         for c in range(1, len(chunks) - 1):
             chunk = chunks[c]
-            best_inner_chunk = phase_chunks(ref, chunk, read_mers, chunks_genotype[c], cartesian_product_generator, k)
+            best_inner_chunk = phase_chunks(ref, chunk, read_mers, cartesian_product_generator=aplotypes_combinations_generator, k)
             best_partial_haps.append(best_inner_chunk)
         
-        best_last_chunk = phase_chunks(ref, chunks[-1], read_mers, chunks_genotype[-1], cartesian_product_generator, k, is_last_chunk='y')
+        best_last_chunk = phase_chunks(ref, chunks[-1], read_mers, cartesian_product_generator=aplotypes_combinations_generator, k, is_first_chunk=None, is_last_chunk=True)
         best_partial_haps.append(best_last_chunk)
         
-        best_haps = phase_chunks(ref, best_partial_haps, read_mers, chunks_genotype, cartesian_product_generator, k, get_genotype='y')
+        # I phase it as if it were an inner chunk, since the initial and final k flanking regions  were already taken into account
+        best_haps = phase_chunks(ref, best_partial_haps, read_mers, chunks_genotype, cartesian_product_generator, k)
  
     #logging.info('Phased haplotypes obtained')
     return best_haps
@@ -286,9 +299,11 @@ def cluster_variants(ref, vcf_file, sample='Sample', k=21, output_path=''):
         for record in ill_vcf_reader_iterator:
             alleles = []
             
-            '''   
+            '''
+            
             If a variant is homozygous, we substitute it directly in the reference, 
             without adding it to the clusters
+ 
             '''
             
             if str(record.genotype(sample)['GT']) == '1/1':
@@ -340,10 +355,11 @@ def cluster_variants(ref, vcf_file, sample='Sample', k=21, output_path=''):
 
 
     logging.info('Variants clustered successfully')
-    return (ref_list, clusters)
+    return (ref_list, clusters) 
 
 def create_pseudo_haplotypes(ref, clusters, read_mers, output_haps='pseudo_haps.fasta'):
     logging.info('Creating pseudo-haplotypes')
+    
     with open(output_haps, 'w') as haps_file:
         haps_file.write('')
         best_haps_list = []
@@ -363,11 +379,16 @@ def create_pseudo_haplotypes(ref, clusters, read_mers, output_haps='pseudo_haps.
                         pseudo_hap_2[curr_pos:curr_pos+len_ref_allele] = ['']*len_ref_allele
                         alt_allele = clusters[chromosome][cluster][0]['ALLELES'][-1][2]
                         pseudo_hap_2[curr_pos] = alt_allele
-
+                    
+                    '''
+                    
+                    NB: They have been alreadu taken are of during the clustering
+                    
                     elif clusters[chromosome][cluster][0]['GT'] == '1/1':
                         pseudo_hap_1[curr_pos:curr_pos+len_ref_allele] = pseudo_hap_2[curr_pos:curr_pos+len_ref_allele] = ['']*len_ref_allele
                         alt_allele = clusters[chromosome][cluster][0]['ALLELES'][-1][2]
                         pseudo_hap_1[curr_pos] = pseudo_hap_2[curr_pos] = alt_allele
+                    '''
 
                     elif clusters[chromosome][cluster][0]['GT'] == '1/2':
                         pseudo_hap_1[curr_pos:curr_pos+len_ref_allele] = pseudo_hap_2[curr_pos:curr_pos+len_ref_allele] = ['']*len_ref_allele
@@ -378,23 +399,17 @@ def create_pseudo_haplotypes(ref, clusters, read_mers, output_haps='pseudo_haps.
 
                 elif len(clusters[chromosome][cluster]) > 1:
                     alleles_to_combine = [dic['ALLELES'] for dic in clusters[chromosome][cluster]]
-                    alleles_genotype = [dic['GT'] for dic in clusters[chromosome][cluster]]
                     
-                    best_haps = get_phased_haplotypes(ref[chromosome], alleles_to_combine, read_mers, alleles_genotype)
+                    best_haps = get_phased_haplotypes(ref[chromosome], alleles_to_combine, read_mers)
                     best_haps_list.append(best_haps)
                     curr_pos = best_haps[0][0]
                     len_ref_allele = best_haps[0][1] - curr_pos
                     pseudo_hap_1[curr_pos:curr_pos + len_ref_allele] = pseudo_hap_2[curr_pos:curr_pos + len_ref_allele] = ['']*len_ref_allele
-
-                    if best_haps[-1] == '1/1':
-                        alt_allele = best_haps[0][2]
-                        pseudo_hap_1[curr_pos] = pseudo_hap_2[curr_pos] = alt_allele
-
-                    elif best_haps[-1] == '1/2':
-                        alt_allele_1 = best_haps[0][2]
-                        alt_allele_2 = best_haps[1][2]
-                        pseudo_hap_1[curr_pos] = alt_allele_1
-                        pseudo_hap_2[curr_pos] = alt_allele_2
+                    
+                    alt_allele_1 = best_haps[0][2]
+                    alt_allele_2 = best_haps[1][2]
+                    pseudo_hap_1[curr_pos] = alt_allele_1
+                    pseudo_hap_2[curr_pos] = alt_allele_2
 
             pseudo_hap_1 = ''.join(pseudo_hap_1)
             pseudo_hap_2 = ''.join(pseudo_hap_2)
