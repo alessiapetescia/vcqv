@@ -415,9 +415,8 @@ def main(args):
     
     run_jf_count(args.reads, k, args.output + 'reads_mer_counts.jf', args.threads, args.min_count)
     read_mers = load_query_table(args.output + 'reads_mer_counts.jf')
-    #read_mers = load_query_table('/projects5/vitis/tobias/beta_jf_real_data_output/reads_mer_counts.jf')
     read_mers_coverage = calculate_coverage(k, genome_len, args.output + 'reads_mer_counts.jf')
-    #read_mers_coverage = 3.92
+    read_mers_coverage = 3.92
     clusters = cluster_variants(args.vcf, args.sample, k, args.output)
     
     best_haps = create_pseudo_haplotypes(ref, clusters, read_mers, args.output + 'pseudo_haps.fasta')
