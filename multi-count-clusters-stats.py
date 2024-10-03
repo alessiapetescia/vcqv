@@ -16,6 +16,8 @@ import subprocess
 import sys
 import logging
 
+# proviamo a vedere se il branch funziona
+
 # Define ks as a global variable
 ks = [21, 31]
 
