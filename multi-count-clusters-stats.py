@@ -17,6 +17,7 @@ import sys
 import logging
 
 # proviamo a vedere se il branch funziona
+# ANDIAMO A CREARE UN PO' DI CAOS
 
 # Define ks as a global variable
 ks = [21, 31]
